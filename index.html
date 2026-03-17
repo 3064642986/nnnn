@@ -1,0 +1,430 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>电信运营商业务知识图谱（可交互）</title>
+  <style>
+    :root {
+      --bg: #0b1220;
+      --panel: #121c30;
+      --text: #e8edf7;
+      --muted: #9bb0d3;
+      --line: #5f6f8f;
+      --highlight: #45c1ff;
+      --accent: #7de3b0;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      font-family: "PingFang SC", "Microsoft YaHei", system-ui, -apple-system, sans-serif;
+      color: var(--text);
+      background: radial-gradient(circle at top left, #14213d 0%, var(--bg) 55%);
+      min-height: 100vh;
+    }
+    .layout {
+      display: grid;
+      grid-template-columns: 1fr 320px;
+      gap: 16px;
+      padding: 16px;
+      height: 100vh;
+    }
+    .canvas-wrap {
+      position: relative;
+      background: linear-gradient(180deg, #0f1a2c, #0c1526);
+      border: 1px solid #2a3a58;
+      border-radius: 14px;
+      overflow: hidden;
+      box-shadow: 0 10px 25px rgba(0,0,0,0.28);
+    }
+    #graph {
+      position: relative;
+      width: 100%;
+      height: 100%;
+    }
+    #edges {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      pointer-events: none;
+    }
+    .node {
+      position: absolute;
+      transform: translate(-50%, -50%);
+      padding: 8px 12px;
+      border-radius: 999px;
+      border: 1px solid #31507d;
+      background: #1b2d4a;
+      color: #e9f2ff;
+      user-select: none;
+      cursor: grab;
+      font-size: 13px;
+      white-space: nowrap;
+      transition: all 0.2s ease;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+    }
+    .node.dragging { cursor: grabbing; }
+    .node.dim { opacity: 0.25; filter: grayscale(0.6); }
+    .node.active {
+      border-color: var(--highlight);
+      box-shadow: 0 0 0 2px rgba(69,193,255,0.35), 0 8px 16px rgba(0,0,0,0.28);
+      transform: translate(-50%, -50%) scale(1.05);
+    }
+    .node[data-group="客户域"] { background: #224f6d; }
+    .node[data-group="产品域"] { background: #3a3767; }
+    .node[data-group="网络域"] { background: #3f5f34; }
+    .node[data-group="计费域"] { background: #6a3f2b; }
+    .node[data-group="运营域"] { background: #5d2f5f; }
+
+    .panel {
+      background: var(--panel);
+      border: 1px solid #2a3a58;
+      border-radius: 14px;
+      padding: 14px;
+      overflow: auto;
+    }
+    h1 {
+      margin: 0 0 6px;
+      font-size: 18px;
+    }
+    .muted { color: var(--muted); font-size: 13px; line-height: 1.5; }
+    .legend {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0,1fr));
+      gap: 8px;
+      margin-top: 12px;
+      margin-bottom: 12px;
+    }
+    .chip {
+      border-radius: 999px;
+      border: 1px solid #38527c;
+      padding: 5px 9px;
+      font-size: 12px;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      cursor: pointer;
+      background: #1a2942;
+      color: #dce8ff;
+    }
+    .chip.active {
+      border-color: var(--accent);
+      color: var(--accent);
+    }
+    .dot { width: 8px; height: 8px; border-radius: 999px; }
+    .info {
+      margin-top: 10px;
+      border-top: 1px dashed #364a6f;
+      padding-top: 10px;
+    }
+    .info h3 { margin: 0 0 6px; font-size: 15px; }
+    .relations { margin: 0; padding-left: 18px; font-size: 13px; line-height: 1.55; }
+    .hint {
+      position: absolute;
+      left: 12px;
+      bottom: 12px;
+      font-size: 12px;
+      color: #c7d5f5;
+      background: rgba(15,24,41,0.65);
+      padding: 8px 10px;
+      border-radius: 10px;
+      border: 1px solid #3b4f76;
+      backdrop-filter: blur(2px);
+    }
+    .edge { stroke: var(--line); stroke-width: 1.5; opacity: 0.9; }
+    .edge.active { stroke: #7de3b0; stroke-width: 2.3; }
+    .edge.dim { opacity: 0.12; }
+    .edge-label {
+      fill: #aec2e6;
+      font-size: 11px;
+      paint-order: stroke;
+      stroke: #0f1a2d;
+      stroke-width: 3px;
+      stroke-linecap: butt;
+      stroke-linejoin: round;
+    }
+    .edge-label.dim { opacity: 0.15; }
+  </style>
+</head>
+<body>
+  <div class="layout">
+    <section class="canvas-wrap">
+      <div id="graph">
+        <svg id="edges"></svg>
+      </div>
+      <div class="hint">拖拽实体移动位置；点击实体可高亮其上下游关系；点击空白处恢复。</div>
+    </section>
+
+    <aside class="panel">
+      <h1>电信运营商业务知识图谱</h1>
+      <div class="muted">
+        参考电信运营商常见业务对象（客户、产品、网络、计费、运营）构建。
+        可用于方案演示、数据治理梳理、指标口径对齐与系统集成讨论。
+      </div>
+
+      <div class="legend" id="legend"></div>
+
+      <div class="info">
+        <h3 id="infoTitle">未选择实体</h3>
+        <div id="infoMeta" class="muted">点击任意节点查看该实体的连接关系。</div>
+        <ul id="infoRelations" class="relations"></ul>
+      </div>
+    </aside>
+  </div>
+
+  <script>
+    const groupColor = {
+      "客户域": "#45c1ff",
+      "产品域": "#9d8cff",
+      "网络域": "#9bdd73",
+      "计费域": "#ff9d66",
+      "运营域": "#e28dff",
+    };
+
+    const nodes = [
+      { id: "个人客户", group: "客户域", x: 170, y: 120, desc: "订购移动/宽带/融合产品的自然人主体" },
+      { id: "政企客户", group: "客户域", x: 170, y: 270, desc: "集团专线、云网、安全、物联网方案客户" },
+      { id: "家庭账户", group: "客户域", x: 350, y: 95, desc: "家庭融合套餐与成员共享关系容器" },
+      { id: "手机号", group: "客户域", x: 360, y: 205, desc: "SIM开户及通信行为承载号码" },
+      { id: "宽带账号", group: "客户域", x: 350, y: 305, desc: "FTTH/家庭网关等接入鉴权账号" },
+
+      { id: "套餐产品", group: "产品域", x: 560, y: 140, desc: "语音流量、宽带速率、权益组合定义" },
+      { id: "增值业务", group: "产品域", x: 560, y: 255, desc: "云盘、视频会员、国际漫游包等附加能力" },
+      { id: "合约", group: "产品域", x: 560, y: 340, desc: "在网时长、违约金、补贴规则约束" },
+
+      { id: "基站小区", group: "网络域", x: 760, y: 110, desc: "无线接入覆盖单元，承载语音/数据业务" },
+      { id: "核心网", group: "网络域", x: 760, y: 225, desc: "会话控制、用户鉴权、策略下发核心节点" },
+      { id: "传输专线", group: "网络域", x: 760, y: 335, desc: "政企互联、云专线、SD-WAN链路资源" },
+
+      { id: "计费账户", group: "计费域", x: 960, y: 120, desc: "账务归集与余额管理主体" },
+      { id: "账单", group: "计费域", x: 960, y: 215, desc: "周期费用、优惠抵扣、税费明细清单" },
+      { id: "支付记录", group: "计费域", x: 960, y: 310, desc: "线上/线下缴费与退款流水" },
+
+      { id: "订单", group: "运营域", x: 1160, y: 105, desc: "开户、变更、退订、迁转等业务请求" },
+      { id: "工单", group: "运营域", x: 1160, y: 200, desc: "装维、故障、投诉处理执行单元" },
+      { id: "客服触点", group: "运营域", x: 1160, y: 295, desc: "热线、APP、营业厅、企业客户经理通道" },
+      { id: "CRM系统", group: "运营域", x: 1160, y: 385, desc: "客户360、营销编排与服务过程沉淀平台" },
+    ];
+
+    const edges = [
+      ["个人客户", "家庭账户", "归属"],
+      ["个人客户", "手机号", "持有"],
+      ["个人客户", "宽带账号", "开通"],
+      ["政企客户", "传输专线", "租用"],
+      ["家庭账户", "套餐产品", "订购"],
+      ["手机号", "套餐产品", "绑定"],
+      ["宽带账号", "套餐产品", "订购"],
+      ["手机号", "增值业务", "开通"],
+      ["套餐产品", "合约", "约束"],
+      ["手机号", "基站小区", "接入"],
+      ["基站小区", "核心网", "回传"],
+      ["传输专线", "核心网", "互联"],
+      ["手机号", "计费账户", "挂接"],
+      ["宽带账号", "计费账户", "挂接"],
+      ["计费账户", "账单", "生成"],
+      ["账单", "支付记录", "结清"],
+      ["套餐产品", "订单", "触发"],
+      ["订单", "工单", "派发"],
+      ["客服触点", "订单", "受理"],
+      ["工单", "CRM系统", "回传"],
+      ["CRM系统", "个人客户", "维护画像"],
+      ["CRM系统", "政企客户", "维护档案"],
+      ["客服触点", "CRM系统", "记录交互"],
+      ["账单", "客服触点", "查询"],
+    ];
+
+    const graph = document.getElementById("graph");
+    const svg = document.getElementById("edges");
+    const legend = document.getElementById("legend");
+    const infoTitle = document.getElementById("infoTitle");
+    const infoMeta = document.getElementById("infoMeta");
+    const infoRelations = document.getElementById("infoRelations");
+
+    const nodeMap = new Map();
+    const edgeEls = [];
+    let selected = null;
+    let activeGroup = null;
+
+    function createLegend() {
+      Object.entries(groupColor).forEach(([group, color]) => {
+        const chip = document.createElement("button");
+        chip.className = "chip";
+        chip.innerHTML = `<span class="dot" style="background:${color}"></span>${group}`;
+        chip.addEventListener("click", () => {
+          if (activeGroup === group) {
+            activeGroup = null;
+            chip.classList.remove("active");
+          } else {
+            activeGroup = group;
+            document.querySelectorAll(".chip").forEach(c => c.classList.remove("active"));
+            chip.classList.add("active");
+          }
+          applyFilter();
+        });
+        legend.appendChild(chip);
+      });
+    }
+
+    function addNode(node) {
+      const el = document.createElement("div");
+      el.className = "node";
+      el.dataset.id = node.id;
+      el.dataset.group = node.group;
+      el.textContent = node.id;
+      graph.appendChild(el);
+
+      node.el = el;
+      nodeMap.set(node.id, node);
+      setNodePos(node, node.x, node.y);
+
+      el.addEventListener("click", (e) => {
+        e.stopPropagation();
+        selected = node.id;
+        renderSelection();
+      });
+
+      let dragging = false, offsetX = 0, offsetY = 0;
+      el.addEventListener("pointerdown", (e) => {
+        dragging = true;
+        el.classList.add("dragging");
+        const rect = graph.getBoundingClientRect();
+        offsetX = e.clientX - rect.left - node.x;
+        offsetY = e.clientY - rect.top - node.y;
+        el.setPointerCapture(e.pointerId);
+      });
+
+      el.addEventListener("pointermove", (e) => {
+        if (!dragging) return;
+        const rect = graph.getBoundingClientRect();
+        const nx = e.clientX - rect.left - offsetX;
+        const ny = e.clientY - rect.top - offsetY;
+        setNodePos(node, nx, ny);
+        renderEdges();
+      });
+
+      el.addEventListener("pointerup", (e) => {
+        dragging = false;
+        el.classList.remove("dragging");
+        el.releasePointerCapture(e.pointerId);
+      });
+    }
+
+    function setNodePos(node, x, y) {
+      const bounds = graph.getBoundingClientRect();
+      node.x = Math.max(60, Math.min(bounds.width - 60, x));
+      node.y = Math.max(40, Math.min(bounds.height - 40, y));
+      node.el.style.left = `${node.x}px`;
+      node.el.style.top = `${node.y}px`;
+    }
+
+    function addEdge([source, target, relation]) {
+      const g = document.createElementNS("http://www.w3.org/2000/svg", "g");
+      const line = document.createElementNS("http://www.w3.org/2000/svg", "line");
+      const label = document.createElementNS("http://www.w3.org/2000/svg", "text");
+      line.setAttribute("class", "edge");
+      label.setAttribute("class", "edge-label");
+      label.textContent = relation;
+      g.appendChild(line);
+      g.appendChild(label);
+      svg.appendChild(g);
+      edgeEls.push({ source, target, relation, line, label });
+    }
+
+    function renderEdges() {
+      svg.setAttribute("viewBox", `0 0 ${graph.clientWidth} ${graph.clientHeight}`);
+      edgeEls.forEach((e) => {
+        const s = nodeMap.get(e.source);
+        const t = nodeMap.get(e.target);
+        e.line.setAttribute("x1", s.x);
+        e.line.setAttribute("y1", s.y);
+        e.line.setAttribute("x2", t.x);
+        e.line.setAttribute("y2", t.y);
+        const mx = (s.x + t.x) / 2;
+        const my = (s.y + t.y) / 2;
+        e.label.setAttribute("x", mx + 3);
+        e.label.setAttribute("y", my - 5);
+      });
+    }
+
+    function neighborSet(nodeId) {
+      const set = new Set([nodeId]);
+      edges.forEach(([s, t]) => {
+        if (s === nodeId) set.add(t);
+        if (t === nodeId) set.add(s);
+      });
+      return set;
+    }
+
+    function renderSelection() {
+      const related = selected ? neighborSet(selected) : null;
+
+      nodes.forEach((n) => {
+        n.el.classList.toggle("active", n.id === selected);
+        const shouldDim = selected && !related.has(n.id);
+        n.el.classList.toggle("dim", !!shouldDim);
+      });
+
+      edgeEls.forEach((e) => {
+        const hit = selected && (e.source === selected || e.target === selected);
+        const dim = selected && !hit;
+        e.line.classList.toggle("active", !!hit);
+        e.line.classList.toggle("dim", !!dim);
+        e.label.classList.toggle("dim", !!dim);
+      });
+
+      renderInfo();
+      applyFilter();
+    }
+
+    function renderInfo() {
+      if (!selected) {
+        infoTitle.textContent = "未选择实体";
+        infoMeta.textContent = "点击任意节点查看该实体的连接关系。";
+        infoRelations.innerHTML = "";
+        return;
+      }
+
+      const node = nodeMap.get(selected);
+      const rels = edges
+        .filter(([s, t]) => s === selected || t === selected)
+        .map(([s, t, r]) => (s === selected ? `${selected} —${r}→ ${t}` : `${s} —${r}→ ${selected}`));
+
+      infoTitle.textContent = `${node.id}（${node.group}）`;
+      infoMeta.textContent = node.desc;
+      infoRelations.innerHTML = rels.map(r => `<li>${r}</li>`).join("");
+    }
+
+    function applyFilter() {
+      nodes.forEach((n) => {
+        const groupHidden = activeGroup && n.group !== activeGroup;
+        n.el.style.display = groupHidden ? "none" : "block";
+      });
+
+      edgeEls.forEach((e) => {
+        const s = nodeMap.get(e.source);
+        const t = nodeMap.get(e.target);
+        const hidden = s.el.style.display === "none" || t.el.style.display === "none";
+        e.line.style.display = hidden ? "none" : "block";
+        e.label.style.display = hidden ? "none" : "block";
+      });
+    }
+
+    function init() {
+      createLegend();
+      nodes.forEach(addNode);
+      edges.forEach(addEdge);
+      renderEdges();
+      renderInfo();
+
+      graph.addEventListener("click", () => {
+        selected = null;
+        renderSelection();
+      });
+      window.addEventListener("resize", renderEdges);
+    }
+
+    init();
+  </script>
+</body>
+</html>
